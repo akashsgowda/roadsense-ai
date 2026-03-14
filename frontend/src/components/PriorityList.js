@@ -12,14 +12,10 @@ export default function PriorityList() {
   const [incidents, setIncidents] = useState([]);
 
   useEffect(() => {
-    getPotholes().then(() => {
-      const mockData = [
-        { incident_id: "mock-1", latitude: "12.9352", longitude: "77.6245", severity: "CRITICAL", status: "reported", report_count: 3 }, // Koramangala
-        { incident_id: "mock-2", latitude: "12.9698", longitude: "77.7499", severity: "HIGH", status: "reported", report_count: 2 }, // Marathahalli
-        { incident_id: "mock-3", latitude: "12.9592", longitude: "77.6974", severity: "MEDIUM", status: "reported", report_count: 1 }, // KR Puram
-      ];
-      
-      const all = mockData.map((p) => {
+    getPotholes().then((res) => {
+      const data = res.status === "success" ? res.data : [];
+
+      const all = data.map((p) => {
         const sev = severityScore[p.severity] || 1;
         const count = parseInt(p.report_count) || 1;
         const traffic = trafficDensity[p.severity] || 1;

@@ -1,7 +1,9 @@
-import React, { useEffect, useState } from "react";
-import { MapContainer, TileLayer, CircleMarker, Popup } from "react-leaflet";
+import React, { useEffect, useState, useRef } from "react";
+import { MapContainer, TileLayer, CircleMarker, Popup, useMap } from "react-leaflet";
 import { getPotholes, updateStatus } from "../services/api";
 import "leaflet/dist/leaflet.css";
+import L from "leaflet";
+import "leaflet.heat";
 
 const severityColor = {
   CRITICAL: "#ef4444", critical: "#ef4444",
@@ -17,13 +19,7 @@ const statusColor = {
   reported: null,
 };
 
-const mockData = [
-  { incident_id: "mock-1", latitude: "12.9172", longitude: "77.6101", severity: "CRITICAL", status: "reported", description: "Large pothole at Silk Board", timestamp: new Date().toISOString() },
-  { incident_id: "mock-2", latitude: "12.9352", longitude: "77.6245", severity: "HIGH", status: "reported", description: "Multiple potholes on ORR", timestamp: new Date().toISOString() },
-  { incident_id: "mock-3", latitude: "12.9592", longitude: "77.6974", severity: "MEDIUM", status: "reported", description: "Road surface damage", timestamp: new Date().toISOString() },
-  { incident_id: "mock-4", latitude: "12.9698", longitude: "77.7499", severity: "HIGH", status: "reported", description: "Pothole near Marathahalli", timestamp: new Date().toISOString() },
-  { incident_id: "mock-5", latitude: "12.9082", longitude: "77.5994", severity: "LOW", status: "resolved", description: "Minor surface crack", timestamp: new Date().toISOString() },
-];
+const severityHeatWeight = { CRITICAL: 1.0, critical: 1.0, HIGH: 0.75, high: 0.75, MEDIUM: 0.5, medium: 0.5, LOW: 0.25, low: 0.25 };
 
 const fetchTrafficIncidents = async () => {
   const cached = sessionStorage.getItem("traffic");
@@ -50,26 +46,56 @@ const popupSelect = {
   cursor: "pointer", marginTop: "4px",
 };
 
+// Heatmap layer component
+function HeatmapLayer({ potholes }) {
+  const map = useMap();
+  const heatRef = useRef(null);
+
+  useEffect(() => {
+    if (!potholes.length) return;
+
+    const points = potholes.map(p => [
+      parseFloat(p.latitude),
+      parseFloat(p.longitude),
+      severityHeatWeight[p.severity] || 0.5
+    ]);
+
+    if (heatRef.current) {
+      map.removeLayer(heatRef.current);
+    }
+
+    heatRef.current = L.heatLayer(points, {
+      radius: 40,
+      blur: 30,
+      maxZoom: 15,
+      gradient: { 0.25: "#22c55e", 0.5: "#eab308", 0.75: "#f97316", 1.0: "#ef4444" }
+    }).addTo(map);
+
+    return () => {
+      if (heatRef.current) map.removeLayer(heatRef.current);
+    };
+  }, [potholes, map]);
+
+  return null;
+}
+
 export default function MapDashboard() {
   const [potholes, setPotholes] = useState([]);
   const [trafficIncidents, setTrafficIncidents] = useState([]);
   const [statuses, setStatuses] = useState({});
+  const [showHeatmap, setShowHeatmap] = useState(false);
 
   useEffect(() => {
     const load = async () => {
       const [potholesRes, trafficData] = await Promise.all([getPotholes(), fetchTrafficIncidents()]);
       const real = potholesRes.status === "success" ? potholesRes.data : [];
-      setPotholes([...real, ...mockData]);
+      setPotholes(real);
       setTrafficIncidents(trafficData);
     };
-    load().catch(() => setPotholes(mockData));
+    load().catch(() => setPotholes([]));
   }, []);
 
   const handleStatusUpdate = async (incidentId, newStatus) => {
-    if (incidentId.startsWith("mock")) {
-      setStatuses(prev => ({ ...prev, [incidentId]: newStatus }));
-      return;
-    }
     try {
       await updateStatus(incidentId, newStatus);
       setStatuses(prev => ({ ...prev, [incidentId]: newStatus }));
@@ -89,13 +115,29 @@ export default function MapDashboard() {
 
   return (
     <div>
-      <div style={{ display: "flex", gap: "16px", flexWrap: "wrap", marginBottom: "16px" }}>
-        {legend.map(l => (
-          <div key={l.label} style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "12px", color: "var(--text-secondary)" }}>
-            <span style={{ width: "10px", height: "10px", borderRadius: "50%", background: l.color, display: "inline-block", boxShadow: `0 0 6px ${l.color}` }} />
-            {l.label}
-          </div>
-        ))}
+      {/* Legend + Heatmap toggle */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px", flexWrap: "wrap", gap: "10px" }}>
+        <div style={{ display: "flex", gap: "16px", flexWrap: "wrap" }}>
+          {legend.map(l => (
+            <div key={l.label} style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "12px", color: "var(--text-secondary)" }}>
+              <span style={{ width: "10px", height: "10px", borderRadius: "50%", background: l.color, display: "inline-block", boxShadow: `0 0 6px ${l.color}` }} />
+              {l.label}
+            </div>
+          ))}
+        </div>
+
+        {/* Heatmap toggle button */}
+        <button
+          onClick={() => setShowHeatmap(h => !h)}
+          style={{
+            padding: "8px 16px", fontSize: "12px", fontWeight: "600",
+            background: showHeatmap ? "#ef4444" : "#6366f1",
+            color: "white", border: "none", borderRadius: "8px",
+            cursor: "pointer", transition: "all 0.2s"
+          }}
+        >
+          {showHeatmap ? "🗺️ Show Markers" : "🔥 Show Heatmap"}
+        </button>
       </div>
 
       <div style={{ height: "520px", width: "100%", borderRadius: "12px", overflow: "hidden", border: "1px solid var(--border)" }}>
@@ -105,7 +147,11 @@ export default function MapDashboard() {
             attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'
           />
 
-          {potholes.map((p) => (
+          {/* Heatmap layer */}
+          {showHeatmap && <HeatmapLayer potholes={potholes} />}
+
+          {/* Pothole markers — hide when heatmap is on */}
+          {!showHeatmap && potholes.map((p) => (
             <CircleMarker
               key={`${p.incident_id}-${statuses[p.incident_id] || p.status}`}
               center={[parseFloat(p.latitude), parseFloat(p.longitude)]}
@@ -145,6 +191,7 @@ export default function MapDashboard() {
             </CircleMarker>
           ))}
 
+          {/* Traffic incidents */}
           {trafficIncidents.slice(0, 20).map((incident, i) => {
             const coords = incident.geometry?.coordinates;
             if (!coords) return null;
