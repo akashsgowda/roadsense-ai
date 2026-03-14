@@ -1,4 +1,4 @@
-const BASE_URL = "http://127.0.0.1:8000/api";
+const BASE_URL = "http://127.0.0.1:8001/api";
 
 export const uploadIncident = async (imageFile, latitude, longitude) => {
   const formData = new FormData();

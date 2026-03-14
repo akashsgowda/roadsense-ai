@@ -3,6 +3,7 @@ import os
 import base64
 import urllib.request
 import ssl
+from datetime import datetime
 
 ssl._create_default_https_context = ssl._create_unverified_context
 
@@ -27,7 +28,7 @@ def call_openrouter(messages, model="openrouter/auto"):
         }
     )
 
-    with urllib.request.urlopen(req) as response:
+    with urllib.request.urlopen(req, timeout=15) as response:
         return json.loads(response.read().decode("utf-8"))
 
 
@@ -92,7 +93,6 @@ IMPORTANT:
         response = call_openrouter(messages)
         response_text = response["choices"][0]["message"]["content"].strip()
 
-        # Clean up any accidental markdown
         if response_text.startswith("```"):
             response_text = response_text.split("```")[1]
             if response_text.startswith("json"):
@@ -121,32 +121,55 @@ IMPORTANT:
         return {"error": "bedrock_failed"}
 
 
-def generate_complaint(latitude, longitude, severity, image_url, street_name="Unknown Road"):
-    prompt = f"""Generate a formal RTI Act 2005 complaint letter to BBMP (Bruhat Bengaluru Mahanagara Palike) about a pothole.
+def generate_complaint(
+    incident_id, latitude, longitude, severity, image_url, street_name="Bengaluru Road",
+    timestamp="", confidence="N/A", size_estimate="N/A",
+    risk_level="N/A", description="N/A",
+    vehicle_damage_cost=0, repair_cost=0, monthly_savings=0
+):
+    try:
+        date_str = datetime.fromisoformat(timestamp).strftime("%d %B %Y")
+    except Exception:
+        date_str = datetime.now().strftime("%d %B %Y")
 
-Details:
-- Location: {street_name} (Lat: {latitude}, Long: {longitude})
+    prompt = f"""Generate a formal RTI Act 2005 complaint letter to BBMP about a pothole.
+Do NOT use any placeholders like [Your Name] or [Your Address].
+Write it as if submitted by a concerned citizen via the RoadSense AI platform.
+
+Use EXACTLY this data — do not make up any values:
+
+INCIDENT DETAILS:
+- Incident ID: {incident_id}
+- Date Reported: {date_str}
+- Location: {street_name}
+- GPS Coordinates: Latitude {latitude}, Longitude {longitude}
 - Severity: {severity}
-- Evidence: {image_url}
+- AI Confidence: {confidence}%
+- Pothole Size: {size_estimate}
+- Risk Level: {risk_level}
+- AI Description: {description}
 
-The letter should:
-1. Be addressed to: Public Information Officer, BBMP, Bengaluru
-2. Cite RTI Act 2005 and Motor Vehicles Act
-3. State the exact GPS coordinates
-4. Mention the severity and safety risk
-5. Request repair timeline and action taken report
-6. Include a deadline of 30 days for response
-7. Be formal, firm, and professional
-8. End with: Submitted via RoadSense AI Platform
+ECONOMIC IMPACT:
+- Vehicle Damage Cost: ₹{vehicle_damage_cost:,} per day
+- Estimated Repair Cost: ₹{repair_cost:,}
+- Monthly Savings if Fixed: ₹{monthly_savings:,}
+- Annual Loss if Ignored: ₹{vehicle_damage_cost * 365:,}
 
-Keep it under 300 words."""
+EVIDENCE: {image_url}
 
-    messages = [
-        {
-            "role": "user",
-            "content": prompt
-        }
-    ]
+The letter must:
+1. Be addressed to: The Public Information Officer, BBMP, Bengaluru
+2. Open with: "Sub: RTI Request and Complaint Regarding Dangerous Pothole at {street_name}, Bengaluru"
+3. Cite RTI Act 2005 Section 6 and Motor Vehicles Act 1988
+4. State all the above incident details and economic impact clearly
+5. Demand: repair timeline, responsible officer name, action taken report
+6. Give BBMP a 30-day deadline to respond
+7. Mention that photographic evidence with AI analysis is attached (Incident ID: {incident_id})
+8. Close with: "Submitted via RoadSense AI Platform — Bengaluru Pothole Intelligence System"
+
+Be formal, firm, data-driven. Under 400 words. No placeholders whatsoever."""
+
+    messages = [{"role": "user", "content": prompt}]
 
     try:
         response = call_openrouter(messages)

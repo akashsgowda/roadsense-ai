@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { uploadIncident } from "../services/api";
+import { uploadIncident, getComplaint } from "../services/api";
 
 const sev2color = { CRITICAL: "#ef4444", HIGH: "#f97316", MEDIUM: "#eab308", LOW: "#22c55e" };
 
@@ -14,6 +14,8 @@ export default function UploadForm({ onUploadSuccess }) {
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
   const [error, setError] = useState("");
+  const [complaint, setComplaint] = useState(null);
+  const [complaintLoading, setComplaintLoading] = useState(false);
 
   const handleImageChange = (e) => {
     const file = e.target.files[0];
@@ -46,32 +48,23 @@ export default function UploadForm({ onUploadSuccess }) {
       alert("Geolocation is not supported by your browser.");
       return;
     }
-    
     setLocationSearch("📡 Acquiring high-precision GPS signal...");
-    
     const getPreciseLocation = (attempt = 1) => {
       navigator.geolocation.getCurrentPosition(
         async (pos) => {
           const lat = pos.coords.latitude;
           const lng = pos.coords.longitude;
           const accuracy = Math.round(pos.coords.accuracy);
-          
-          // If accuracy is poor (worse than 50m) and we haven't tried too many times, retry.
-          // Browsers often return a quick cached/network fix first, then a slow precise GPS fix.
           if (accuracy > 50 && attempt < 4) {
             setLocationSearch(`📡 Calibrating GPS (Attempt ${attempt}/3)...`);
             setTimeout(() => getPreciseLocation(attempt + 1), 2000);
             return;
           }
-
           setLatitude(lat);
           setLongitude(lng);
           setLocationSearch("📍 Detected location");
-          
           try {
-            const res = await fetch(
-              `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json`
-            );
+            const res = await fetch(`https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json`);
             const data = await res.json();
             const addr = data.address || {};
             const label = [
@@ -79,7 +72,6 @@ export default function UploadForm({ onUploadSuccess }) {
               addr.suburb || addr.neighbourhood || addr.quarter,
               addr.city || addr.town || addr.village,
             ].filter(Boolean).join(", ");
-            
             const finalName = label || (data.display_name ? data.display_name.split(",").slice(0,3).join(",") : "Unknown Location");
             setLocationName(`${finalName} (±${accuracy}m)`);
             setLocationSearch(label || (data.display_name ? data.display_name.split(",").slice(0,2).join(",") : ""));
@@ -101,7 +93,6 @@ export default function UploadForm({ onUploadSuccess }) {
         { enableHighAccuracy: true, maximumAge: 0, timeout: 20000 }
       );
     };
-
     getPreciseLocation();
   };
 
@@ -111,13 +102,24 @@ export default function UploadForm({ onUploadSuccess }) {
       setError("Please select an image and set a location.");
       return;
     }
-    setLoading(true); setError(""); setResult(null);
+    setLoading(true); setError(""); setResult(null); setComplaint(null);
     try {
       const res = await uploadIncident(image, latitude, longitude);
       if (res.status === "error") { setError(res.message || "Could not analyze image."); setLoading(false); return; }
       if (res.status === "success") { setResult(res.data); if (onUploadSuccess) onUploadSuccess(); }
     } catch { setError("Upload failed. Please check your connection and try again."); }
     setLoading(false);
+  };
+
+  const handleGenerateComplaint = async () => {
+    if (!result?.incident_id) return;
+    setComplaintLoading(true);
+    try {
+      const res = await getComplaint(result.incident_id);
+      if (res.status === "success") setComplaint(res.data.complaint);
+      else setComplaint("Failed to generate complaint. Please try again.");
+    } catch { setComplaint("Error generating complaint."); }
+    setComplaintLoading(false);
   };
 
   return (
@@ -177,7 +179,6 @@ export default function UploadForm({ onUploadSuccess }) {
             </button>
           </div>
 
-          {/* Suggestions dropdown */}
           {suggestions.length > 0 && (
             <div style={{
               position: "absolute", zIndex: 1000,
@@ -222,7 +223,7 @@ export default function UploadForm({ onUploadSuccess }) {
         </div>
       )}
 
-      {/* Success */}
+      {/* Success Result */}
       {result && (
         <div style={{
           marginTop: "16px", padding: "20px",
@@ -251,11 +252,72 @@ export default function UploadForm({ onUploadSuccess }) {
             </p>
           )}
 
-          <div style={{ borderTop: "1px solid rgba(16,185,129,0.15)", paddingTop: "12px", display: "flex", flexDirection: "column", gap: "6px" }}>
+          <div style={{ borderTop: "1px solid rgba(16,185,129,0.15)", paddingTop: "12px", display: "flex", flexDirection: "column", gap: "6px", marginBottom: "16px" }}>
             <p style={{ fontSize: "12px", color: "var(--text-secondary)" }}>💸 Vehicle damage/day: <strong style={{ color: "var(--text-primary)" }}>₹{Number(result.vehicle_damage_cost_per_day || 0).toLocaleString()}</strong></p>
             <p style={{ fontSize: "12px", color: "var(--text-secondary)" }}>🔧 Repair cost: <strong style={{ color: "var(--text-primary)" }}>₹{Number(result.repair_cost || 0).toLocaleString()}</strong></p>
             <p style={{ fontSize: "12px", color: "var(--text-secondary)" }}>💰 Monthly savings if fixed: <strong style={{ color: "#34d399" }}>₹{Number(result.monthly_savings_if_fixed || 0).toLocaleString()}</strong></p>
           </div>
+
+          {/* COMPLAINT SECTION */}
+          {!complaint ? (
+            <button
+              onClick={handleGenerateComplaint}
+              disabled={complaintLoading}
+              style={{
+                width: "100%", padding: "12px",
+                background: complaintLoading ? "#374151" : "linear-gradient(135deg, #7c3aed, #6366f1)",
+                color: "white", border: "none", borderRadius: "10px",
+                cursor: complaintLoading ? "not-allowed" : "pointer",
+                fontSize: "13px", fontWeight: "600", fontFamily: "Inter, sans-serif"
+              }}
+            >
+              {complaintLoading ? "⏳ Generating BBMP Complaint..." : "📋 Generate BBMP RTI Complaint"}
+            </button>
+          ) : (
+            <div style={{
+              background: "rgba(99,102,241,0.08)", border: "1px solid rgba(99,102,241,0.25)",
+              borderRadius: "10px", padding: "16px"
+            }}>
+              <div style={{ fontSize: "12px", fontWeight: "600", color: "#818cf8", marginBottom: "10px" }}>
+                📋 BBMP RTI Complaint Generated
+              </div>
+              <div style={{
+                fontSize: "12px", color: "var(--text-secondary)", lineHeight: "1.8",
+                maxHeight: "200px", overflowY: "auto", whiteSpace: "pre-wrap"
+              }}>
+                {complaint}
+              </div>
+              <div style={{ marginTop: "10px", display: "flex", gap: "8px" }}>
+                <button
+                  onClick={() => navigator.clipboard.writeText(complaint)}
+                  style={{
+                    flex: 1, padding: "8px", background: "rgba(99,102,241,0.15)",
+                    color: "#818cf8", border: "1px solid rgba(99,102,241,0.3)",
+                    borderRadius: "8px", cursor: "pointer", fontSize: "12px", fontWeight: "600"
+                  }}
+                >
+                  📋 Copy Complaint
+                </button>
+                <button
+                  onClick={() => {
+                    const blob = new Blob([complaint], { type: "text/plain" });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement("a");
+                    a.href = url; a.download = `bbmp_complaint_${result.incident_id}.txt`;
+                    a.click();
+                  }}
+                  style={{
+                    flex: 1, padding: "8px", background: "rgba(16,185,129,0.15)",
+                    color: "#34d399", border: "1px solid rgba(16,185,129,0.3)",
+                    borderRadius: "8px", cursor: "pointer", fontSize: "12px", fontWeight: "600"
+                  }}
+                >
+                  ⬇️ Download
+                </button>
+              </div>
+              <p style={{ fontSize: "11px", color: "#34d399", marginTop: "8px" }}>✅ Complaint ready to submit to BBMP</p>
+            </div>
+          )}
 
           <p style={{ fontSize: "10px", color: "var(--text-muted)", marginTop: "10px" }}>ID: {result.incident_id}</p>
         </div>

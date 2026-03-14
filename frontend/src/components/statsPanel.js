@@ -6,6 +6,9 @@ export default function StatsPanel() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    const cached = sessionStorage.getItem("stats");
+    if (cached) { setStats(JSON.parse(cached)); setLoading(false); return; }
+
     Promise.all([getStats(), getPotholes()]).then(([statsRes, potholesRes]) => {
       const s = statsRes.status === "success" ? statsRes.data : null;
       const incidents = potholesRes.status === "success" ? potholesRes.data : [];
@@ -15,7 +18,9 @@ export default function StatsPanel() {
         zones[zone] = (zones[zone] || 0) + 1;
       });
       const worstZone = Object.entries(zones).sort((a, b) => b[1] - a[1])[0]?.[0] || "Silk Board";
-      setStats({ ...s, worstZone, complaints_sent: incidents.filter(p => p.complaint_sent).length });
+      const finalStats = { ...s, worstZone, complaints_sent: incidents.filter(p => p.complaint_sent).length };
+      setStats(finalStats);
+      sessionStorage.setItem("stats", JSON.stringify(finalStats));
       setLoading(false);
     });
   }, []);
@@ -41,7 +46,7 @@ export default function StatsPanel() {
   return (
     <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "16px" }}>
       {cards.map((card) => (
-        <div key={card.label} className="stat-card" style={{ "--card-color": card.color } }
+        <div key={card.label} className="stat-card" style={{ "--card-color": card.color }}
           onMouseEnter={e => {
             e.currentTarget.style.boxShadow = `0 0 24px ${card.glow}, var(--shadow-elevated)`;
             e.currentTarget.style.borderColor = card.color + "55";

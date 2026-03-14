@@ -119,7 +119,7 @@ export default function Home() {
               <p className="section-subtitle">Upload a photo and tag your location for AI analysis</p>
             </div>
             <div className="glass-card" style={{ padding: "32px" }}>
-              <UploadForm onUploadSuccess={() => { setRefresh(r => r + 1); setActiveTab("dashboard"); }} />
+             <UploadForm onUploadSuccess={() => { setRefresh(r => r + 1); }} />
             </div>
           </div>
         )}

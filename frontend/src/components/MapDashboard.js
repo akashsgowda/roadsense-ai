@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { MapContainer, TileLayer, CircleMarker, Popup } from "react-leaflet";
-import { getPotholes, getComplaint, updateStatus } from "../services/api";
+import { getPotholes, updateStatus } from "../services/api";
 import "leaflet/dist/leaflet.css";
 
 const severityColor = {
@@ -8,6 +8,13 @@ const severityColor = {
   HIGH: "#f97316", high: "#f97316",
   MEDIUM: "#eab308", medium: "#eab308",
   LOW: "#22c55e", low: "#22c55e",
+};
+
+const statusColor = {
+  fixed: "#22c55e",
+  in_progress: "#3b82f6",
+  under_review: "#f59e0b",
+  reported: null,
 };
 
 const mockData = [
@@ -19,6 +26,8 @@ const mockData = [
 ];
 
 const fetchTrafficIncidents = async () => {
+  const cached = sessionStorage.getItem("traffic");
+  if (cached) return JSON.parse(cached);
   const key = process.env.REACT_APP_TOMTOM_KEY;
   const bbox = "77.4,12.8,77.8,13.2";
   try {
@@ -26,19 +35,10 @@ const fetchTrafficIncidents = async () => {
       `https://api.tomtom.com/traffic/services/5/incidentDetails?key=${key}&bbox=${bbox}&fields={incidents{type,geometry{type,coordinates},properties{iconCategory,magnitudeOfDelay,events{description,code},startTime,endTime,from,to,length,delay,roadNumbers,timeValidity}}}&language=en-GB&categoryFilter=0,1,2,3,4,5,6,7,8,9,10,11&timeValidityFilter=present`
     );
     const data = await res.json();
-    return data.incidents || [];
+    const incidents = data.incidents || [];
+    sessionStorage.setItem("traffic", JSON.stringify(incidents));
+    return incidents;
   } catch { return []; }
-};
-
-// Popup inner button style
-const popupBtn = {
-  background: "linear-gradient(135deg, #dc2626, #ef4444)",
-  color: "white", border: "none",
-  padding: "7px 12px", borderRadius: "6px",
-  cursor: "pointer", width: "100%",
-  fontSize: "12px", fontWeight: "600",
-  fontFamily: "Inter, sans-serif",
-  marginTop: "6px",
 };
 
 const popupSelect = {
@@ -53,8 +53,6 @@ const popupSelect = {
 export default function MapDashboard() {
   const [potholes, setPotholes] = useState([]);
   const [trafficIncidents, setTrafficIncidents] = useState([]);
-  const [complaints, setComplaints] = useState({});
-  const [loadingComplaint, setLoadingComplaint] = useState({});
   const [statuses, setStatuses] = useState({});
 
   useEffect(() => {
@@ -67,21 +65,11 @@ export default function MapDashboard() {
     load().catch(() => setPotholes(mockData));
   }, []);
 
-  const handleGenerateComplaint = async (incidentId) => {
+  const handleStatusUpdate = async (incidentId, newStatus) => {
     if (incidentId.startsWith("mock")) {
-      setComplaints(prev => ({ ...prev, [incidentId]: "This is a demo incident. Upload a real pothole to generate a complaint." }));
+      setStatuses(prev => ({ ...prev, [incidentId]: newStatus }));
       return;
     }
-    setLoadingComplaint(prev => ({ ...prev, [incidentId]: true }));
-    try {
-      const res = await getComplaint(incidentId);
-      setComplaints(prev => ({ ...prev, [incidentId]: res.status === "success" ? res.data.complaint : "Failed to generate complaint." }));
-    } catch { setComplaints(prev => ({ ...prev, [incidentId]: "Error generating complaint." })); }
-    setLoadingComplaint(prev => ({ ...prev, [incidentId]: false }));
-  };
-
-  const handleStatusUpdate = async (incidentId, newStatus) => {
-    if (incidentId.startsWith("mock")) return;
     try {
       await updateStatus(incidentId, newStatus);
       setStatuses(prev => ({ ...prev, [incidentId]: newStatus }));
@@ -93,12 +81,14 @@ export default function MapDashboard() {
     { label: "High", color: "#f97316" },
     { label: "Medium", color: "#eab308" },
     { label: "Low", color: "#22c55e" },
+    { label: "In Progress", color: "#3b82f6" },
+    { label: "Under Review", color: "#f59e0b" },
+    { label: "Fixed", color: "#22c55e" },
     { label: "Traffic", color: "#818cf8" },
   ];
 
   return (
     <div>
-      {/* Legend */}
       <div style={{ display: "flex", gap: "16px", flexWrap: "wrap", marginBottom: "16px" }}>
         {legend.map(l => (
           <div key={l.label} style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "12px", color: "var(--text-secondary)" }}>
@@ -108,7 +98,6 @@ export default function MapDashboard() {
         ))}
       </div>
 
-      {/* Map */}
       <div style={{ height: "520px", width: "100%", borderRadius: "12px", overflow: "hidden", border: "1px solid var(--border)" }}>
         <MapContainer center={[12.9352, 77.6245]} zoom={12} style={{ height: "100%", width: "100%" }}>
           <TileLayer
@@ -118,49 +107,39 @@ export default function MapDashboard() {
 
           {potholes.map((p) => (
             <CircleMarker
-              key={p.incident_id}
+              key={`${p.incident_id}-${statuses[p.incident_id] || p.status}`}
               center={[parseFloat(p.latitude), parseFloat(p.longitude)]}
               radius={12}
-              fillColor={severityColor[p.severity] || "#eab308"}
+              fillColor={statusColor[statuses[p.incident_id] || p.status] || severityColor[p.severity] || "#eab308"}
               color="rgba(0,0,0,0.4)"
               weight={1}
               fillOpacity={0.9}
             >
-              <Popup minWidth={260}>
+              <Popup minWidth={240}>
                 <div style={{ fontFamily: "Inter, sans-serif" }}>
                   <div style={{ fontWeight: "700", fontSize: "13px", color: severityColor[p.severity], marginBottom: "6px" }}>
                     {p.severity} Pothole
                   </div>
                   <div style={{ fontSize: "11px", color: "#94a3b8", marginBottom: "2px" }}>
-                    Status: <span style={{ color: "#f1f5f9" }}>{statuses[p.incident_id] || p.status}</span>
+                    Status: <span style={{ color: "#f1f5f9", fontWeight: "600" }}>{statuses[p.incident_id] || p.status}</span>
                   </div>
-                  {p.description && <div style={{ fontSize: "11px", color: "#94a3b8", marginBottom: "2px" }}>{p.description}</div>}
-                  <div style={{ fontSize: "10px", color: "#475569", marginBottom: "10px" }}>{new Date(p.timestamp).toLocaleString()}</div>
-
-                  {!complaints[p.incident_id] ? (
-                    <button onClick={() => handleGenerateComplaint(p.incident_id)} disabled={loadingComplaint[p.incident_id]} style={popupBtn}>
-                      {loadingComplaint[p.incident_id] ? "Generating..." : "📋 Generate BBMP Complaint"}
-                    </button>
-                  ) : (
-                    <div style={{ marginTop: "8px" }}>
-                      <div style={{ background: "rgba(16,185,129,0.1)", border: "1px solid rgba(16,185,129,0.2)", borderRadius: "6px", padding: "8px", fontSize: "11px", color: "#94a3b8", maxHeight: "100px", overflowY: "auto" }}>
-                        {complaints[p.incident_id]}
-                      </div>
-                      <p style={{ color: "#34d399", fontSize: "11px", marginTop: "4px" }}>✅ Complaint Sent</p>
-                    </div>
+                  {p.description && (
+                    <div style={{ fontSize: "11px", color: "#94a3b8", marginBottom: "2px" }}>{p.description}</div>
                   )}
-
-                  {!p.incident_id.startsWith("mock") && (
-                    <div style={{ marginTop: "8px" }}>
-                      <div style={{ fontSize: "10px", color: "#475569", marginBottom: "4px" }}>Update Status:</div>
-                      <select value={statuses[p.incident_id] || p.status} onChange={(e) => handleStatusUpdate(p.incident_id, e.target.value)} style={popupSelect}>
-                        <option value="reported">📌 Reported</option>
-                        <option value="under_review">🔍 Under Review</option>
-                        <option value="in_progress">🔧 In Progress</option>
-                        <option value="fixed">✅ Fixed</option>
-                      </select>
-                    </div>
-                  )}
+                  <div style={{ fontSize: "10px", color: "#475569", marginBottom: "10px" }}>
+                    {new Date(p.timestamp).toLocaleString()}
+                  </div>
+                  <div style={{ fontSize: "10px", color: "#475569", marginBottom: "4px" }}>Update Status:</div>
+                  <select
+                    value={statuses[p.incident_id] || p.status}
+                    onChange={(e) => handleStatusUpdate(p.incident_id, e.target.value)}
+                    style={popupSelect}
+                  >
+                    <option value="reported">📌 Reported</option>
+                    <option value="under_review">🔍 Under Review</option>
+                    <option value="in_progress">🔧 In Progress</option>
+                    <option value="fixed">✅ Fixed</option>
+                  </select>
                 </div>
               </Popup>
             </CircleMarker>
