@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef } from "react";
 import { MapContainer, TileLayer, CircleMarker, Popup, useMap } from "react-leaflet";
-import { getPotholes, updateStatus } from "../services/api";
+import { getPotholes, updateStatus, upvotePothole } from "../services/api";
 import "leaflet/dist/leaflet.css";
 import L from "leaflet";
 import "leaflet.heat";
@@ -46,34 +46,23 @@ const popupSelect = {
   cursor: "pointer", marginTop: "4px",
 };
 
-// Heatmap layer component
 function HeatmapLayer({ potholes }) {
   const map = useMap();
   const heatRef = useRef(null);
 
   useEffect(() => {
     if (!potholes.length) return;
-
     const points = potholes.map(p => [
       parseFloat(p.latitude),
       parseFloat(p.longitude),
       severityHeatWeight[p.severity] || 0.5
     ]);
-
-    if (heatRef.current) {
-      map.removeLayer(heatRef.current);
-    }
-
+    if (heatRef.current) map.removeLayer(heatRef.current);
     heatRef.current = L.heatLayer(points, {
-      radius: 40,
-      blur: 30,
-      maxZoom: 15,
+      radius: 40, blur: 30, maxZoom: 15,
       gradient: { 0.25: "#22c55e", 0.5: "#eab308", 0.75: "#f97316", 1.0: "#ef4444" }
     }).addTo(map);
-
-    return () => {
-      if (heatRef.current) map.removeLayer(heatRef.current);
-    };
+    return () => { if (heatRef.current) map.removeLayer(heatRef.current); };
   }, [potholes, map]);
 
   return null;
@@ -83,6 +72,8 @@ export default function MapDashboard() {
   const [potholes, setPotholes] = useState([]);
   const [trafficIncidents, setTrafficIncidents] = useState([]);
   const [statuses, setStatuses] = useState({});
+  const [upvotes, setUpvotes] = useState({});
+  const [upvoted, setUpvoted] = useState({});
   const [showHeatmap, setShowHeatmap] = useState(false);
 
   useEffect(() => {
@@ -90,6 +81,10 @@ export default function MapDashboard() {
       const [potholesRes, trafficData] = await Promise.all([getPotholes(), fetchTrafficIncidents()]);
       const real = potholesRes.status === "success" ? potholesRes.data : [];
       setPotholes(real);
+      // Initialize upvotes from data
+      const upvoteMap = {};
+      real.forEach(p => { upvoteMap[p.incident_id] = parseInt(p.upvotes) || 0; });
+      setUpvotes(upvoteMap);
       setTrafficIncidents(trafficData);
     };
     load().catch(() => setPotholes([]));
@@ -100,6 +95,17 @@ export default function MapDashboard() {
       await updateStatus(incidentId, newStatus);
       setStatuses(prev => ({ ...prev, [incidentId]: newStatus }));
     } catch { alert("Failed to update status"); }
+  };
+
+  const handleUpvote = async (incidentId) => {
+    if (upvoted[incidentId]) return;
+    try {
+      const res = await upvotePothole(incidentId);
+      if (res.status === "success") {
+        setUpvotes(prev => ({ ...prev, [incidentId]: res.data.upvotes }));
+        setUpvoted(prev => ({ ...prev, [incidentId]: true }));
+      }
+    } catch { }
   };
 
   const legend = [
@@ -115,7 +121,6 @@ export default function MapDashboard() {
 
   return (
     <div>
-      {/* Legend + Heatmap toggle */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px", flexWrap: "wrap", gap: "10px" }}>
         <div style={{ display: "flex", gap: "16px", flexWrap: "wrap" }}>
           {legend.map(l => (
@@ -125,8 +130,6 @@ export default function MapDashboard() {
             </div>
           ))}
         </div>
-
-        {/* Heatmap toggle button */}
         <button
           onClick={() => setShowHeatmap(h => !h)}
           style={{
@@ -147,10 +150,8 @@ export default function MapDashboard() {
             attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'
           />
 
-          {/* Heatmap layer */}
           {showHeatmap && <HeatmapLayer potholes={potholes} />}
 
-          {/* Pothole markers — hide when heatmap is on */}
           {!showHeatmap && potholes.map((p) => (
             <CircleMarker
               key={`${p.incident_id}-${statuses[p.incident_id] || p.status}`}
@@ -163,18 +164,43 @@ export default function MapDashboard() {
             >
               <Popup minWidth={240}>
                 <div style={{ fontFamily: "Inter, sans-serif" }}>
+                  {/* Severity */}
                   <div style={{ fontWeight: "700", fontSize: "13px", color: severityColor[p.severity], marginBottom: "6px" }}>
                     {p.severity} Pothole
                   </div>
+
+                  {/* Status */}
                   <div style={{ fontSize: "11px", color: "#94a3b8", marginBottom: "2px" }}>
                     Status: <span style={{ color: "#f1f5f9", fontWeight: "600" }}>{statuses[p.incident_id] || p.status}</span>
                   </div>
+
+                  {/* Description */}
                   {p.description && (
-                    <div style={{ fontSize: "11px", color: "#94a3b8", marginBottom: "2px" }}>{p.description}</div>
+                    <div style={{ fontSize: "11px", color: "#94a3b8", marginBottom: "4px" }}>{p.description}</div>
                   )}
+
+                  {/* Timestamp */}
                   <div style={{ fontSize: "10px", color: "#475569", marginBottom: "10px" }}>
                     {new Date(p.timestamp).toLocaleString()}
                   </div>
+
+                  {/* Upvote button */}
+                  <button
+                    onClick={() => handleUpvote(p.incident_id)}
+                    disabled={upvoted[p.incident_id]}
+                    style={{
+                      width: "100%", padding: "8px", marginBottom: "8px",
+                      background: upvoted[p.incident_id] ? "#22c55e22" : "#6366f122",
+                      color: upvoted[p.incident_id] ? "#22c55e" : "#818cf8",
+                      border: `1px solid ${upvoted[p.incident_id] ? "#22c55e44" : "#6366f144"}`,
+                      borderRadius: "6px", cursor: upvoted[p.incident_id] ? "default" : "pointer",
+                      fontSize: "12px", fontWeight: "600"
+                    }}
+                  >
+                    {upvoted[p.incident_id] ? "✅ Upvoted!" : `👍 ${upvotes[p.incident_id] || 0}`}
+                  </button>
+
+                  {/* Status update */}
                   <div style={{ fontSize: "10px", color: "#475569", marginBottom: "4px" }}>Update Status:</div>
                   <select
                     value={statuses[p.incident_id] || p.status}
@@ -191,7 +217,6 @@ export default function MapDashboard() {
             </CircleMarker>
           ))}
 
-          {/* Traffic incidents */}
           {trafficIncidents.slice(0, 20).map((incident, i) => {
             const coords = incident.geometry?.coordinates;
             if (!coords) return null;

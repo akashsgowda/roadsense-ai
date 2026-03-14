@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import { uploadIncident, getComplaint } from "../services/api";
+import StatusTracker from "./StatusTracker";
 
 const sev2color = { CRITICAL: "#ef4444", HIGH: "#f97316", MEDIUM: "#eab308", LOW: "#22c55e" };
 
@@ -16,6 +17,7 @@ export default function UploadForm({ onUploadSuccess }) {
   const [error, setError] = useState("");
   const [complaint, setComplaint] = useState(null);
   const [complaintLoading, setComplaintLoading] = useState(false);
+  const [showTracker, setShowTracker] = useState(false);
 
   const handleImageChange = (e) => {
     const file = e.target.files[0];
@@ -124,6 +126,15 @@ export default function UploadForm({ onUploadSuccess }) {
 
   return (
     <div>
+      {/* Status Tracker Modal */}
+      {showTracker && result && (
+        <StatusTracker
+          incidentId={result.incident_id}
+          severity={result.severity}
+          onClose={() => setShowTracker(false)}
+        />
+      )}
+
       <form onSubmit={handleSubmit}>
 
         {/* Image upload area */}
@@ -258,6 +269,20 @@ export default function UploadForm({ onUploadSuccess }) {
             <p style={{ fontSize: "12px", color: "var(--text-secondary)" }}>💰 Monthly savings if fixed: <strong style={{ color: "#34d399" }}>₹{Number(result.monthly_savings_if_fixed || 0).toLocaleString()}</strong></p>
           </div>
 
+          {/* Track Status Button */}
+          <button
+            onClick={() => setShowTracker(true)}
+            style={{
+              width: "100%", padding: "12px", marginBottom: "10px",
+              background: "linear-gradient(135deg, #1e293b, #0f172a)",
+              color: "white", border: "1px solid rgba(99,102,241,0.4)",
+              borderRadius: "10px", cursor: "pointer",
+              fontSize: "13px", fontWeight: "600"
+            }}
+          >
+            📍 Track Repair Status
+          </button>
+
           {/* COMPLAINT SECTION */}
           {!complaint ? (
             <button
@@ -296,7 +321,17 @@ export default function UploadForm({ onUploadSuccess }) {
                     borderRadius: "8px", cursor: "pointer", fontSize: "12px", fontWeight: "600"
                   }}
                 >
-                  📋 Copy Complaint
+                  📋 Copy
+                </button>
+                <button
+                  onClick={() => window.open(`mailto:complaints@bbmp.gov.in?subject=Urgent Pothole Repair Request - ${result.incident_id}&body=${encodeURIComponent(complaint)}`)}
+                  style={{
+                    flex: 1, padding: "8px", background: "rgba(34,197,94,0.15)",
+                    color: "#34d399", border: "1px solid rgba(34,197,94,0.3)",
+                    borderRadius: "8px", cursor: "pointer", fontSize: "12px", fontWeight: "600"
+                  }}
+                >
+                  📧 Email BBMP
                 </button>
                 <button
                   onClick={() => {
